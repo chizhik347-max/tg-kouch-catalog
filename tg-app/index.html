@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="color-scheme" content="light dark">
+  <title>Елена Чижик — Психолог</title>
+
+  <!-- Telegram Mini App SDK — обязательно до JS-кода приложения -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ═══════════════════════════════════════════════════════════
+       ЭКРАН 0: СПЛЭШ
+  ════════════════════════════════════════════════════════════ -->
+  <div id="screen-splash" class="screen screen--active">
+    <div class="splash__logo">
+      <div class="avatar avatar--xl" id="splash-avatar">ЕЧ</div>
+    </div>
+    <div class="splash__name" id="splash-name">Елена Чижик</div>
+    <div class="splash__title">Психолог · Гештальт-терапевт</div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       ЭКРАН 1: ОНБОРДИНГ-КВИЗ
+  ════════════════════════════════════════════════════════════ -->
+  <div id="screen-quiz" class="screen">
+    <!-- Прогресс-бар -->
+    <div class="quiz__progress">
+      <div class="quiz__progress-fill" id="quiz-progress-fill" style="width: 33%"></div>
+    </div>
+    <!-- Заголовок шага -->
+    <div class="header">
+      <span class="header__title" id="quiz-step-label">Шаг 1 из 3</span>
+    </div>
+    <!-- Содержимое вопроса -->
+    <div class="screen__body screen__body--padded">
+      <div class="quiz__question" id="quiz-question"></div>
+      <div class="quiz__options" id="quiz-options"></div>
+    </div>
+    <button class="main-btn" id="quiz-next-btn" disabled>Далее</button>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       ЭКРАН 2: ГЛАВНАЯ
+  ════════════════════════════════════════════════════════════ -->
+  <div id="screen-home" class="screen">
+    <div class="screen__body">
+
+      <!-- Герой: специалист -->
+      <div class="home__hero">
+        <div class="avatar avatar--lg" id="home-avatar">ЕЧ</div>
+        <div class="home__hero-info">
+          <div class="home__name" id="home-name"></div>
+          <div class="home__title" id="home-spec-title"></div>
+          <div class="home__meta">
+            <span class="stars">★★★★★</span>
+            <span id="home-rating"></span>
+            <span>·</span>
+            <span id="home-clients"></span>
+          </div>
+          <div class="home__slot-badge" id="home-slot-badge">
+            🟢 <span id="home-slot-text"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Услуги -->
+      <div class="section-title">Мои услуги</div>
+      <div class="services-list" id="home-services"></div>
+
+      <!-- Отзывы -->
+      <div class="section-title">Отзывы</div>
+      <div class="reviews-list" id="home-reviews"></div>
+
+    </div>
+
+    <!-- Нижний таббар -->
+    <nav class="bottom-nav">
+      <button class="bottom-nav__btn bottom-nav__btn--active" id="nav-services" onclick="App.goTab('services')">
+        <span class="bottom-nav__icon">🏠</span>
+        Услуги
+      </button>
+      <button class="bottom-nav__btn" id="nav-bookings" onclick="App.goTab('bookings')">
+        <span class="bottom-nav__icon">📅</span>
+        Мои записи
+      </button>
+      <button class="bottom-nav__btn" id="nav-profile" onclick="App.goTab('profile')">
+        <span class="bottom-nav__icon">👤</span>
+        Профиль
+      </button>
+    </nav>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       ЭКРАН 3: ДЕТАЛИ УСЛУГИ
+  ════════════════════════════════════════════════════════════ -->
+  <div id="screen-service-detail" class="screen">
+    <div class="header">
+      <button class="header__back" onclick="App.back()">
+        <svg width="10" height="17" viewBox="0 0 10 17" fill="none">
+          <path d="M9 1L2 8.5L9 16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <span class="header__title" id="detail-header-title">Услуга</span>
+    </div>
+    <div class="screen__body">
+      <div class="service-detail__hero">
+        <div class="service-detail__icon" id="detail-icon"></div>
+        <div class="service-detail__name" id="detail-name"></div>
+        <div class="service-detail__meta" id="detail-meta"></div>
+        <div class="service-detail__price" id="detail-price"></div>
+      </div>
+
+      <div class="section-block">
+        <div class="section-block__title">Описание</div>
+        <div id="detail-description" style="font-size:15px;line-height:1.6;color:var(--text)"></div>
+      </div>
+
+      <div class="section-block">
+        <div class="section-block__title">Что входит</div>
+        <div class="includes-list" id="detail-includes"></div>
+      </div>
+
+      <div class="section-block">
+        <div class="section-block__title">Для кого</div>
+        <div class="chips-row" id="detail-for-whom"></div>
+      </div>
+
+      <!-- Мини-профиль специалиста -->
+      <div class="specialist-mini" onclick="App.navigate('profile')">
+        <div class="avatar avatar--sm" id="detail-spec-avatar">ЕЧ</div>
+        <div class="specialist-mini__info">
+          <div class="specialist-mini__name" id="detail-spec-name"></div>
+          <div class="specialist-mini__title" id="detail-spec-title"></div>
+        </div>
+        <span class="specialist-mini__arrow">›</span>
+      </div>
+
+      <!-- Один отзыв -->
+      <div class="section-block">
+        <div class="section-block__title">Отзывы</div>
+        <div id="detail-review"></div>
+      </div>
+
+      <div style="height:20px"></div>
+    </div>
+    <button class="main-btn" id="detail-book-btn" onclick="App.navigate('datePicker')">
+      Выбрать время
+    </button>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       ЭКРАН 4: ВЫБОР ДАТЫ И ВРЕМЕНИ
+  ════════════════════════════════════════════════════════════ -->
+  <div id="screen-date-picker" class="screen">
+    <div class="header">
+      <button class="header__back" onclick="App.back()">
+        <svg width="10" height="17" viewBox="0 0 10 17" fill="none">
+          <path d="M9 1L2 8.5L9 16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <span class="header__title">Выбор времени</span>
+    </div>
+
+    <!-- Контекстная строка: выбранная услуга -->
+    <div class="context-bar" id="picker-context"></div>
+
+    <div class="screen__body">
+      <!-- Календарь -->
+      <div class="calendar">
+        <div class="calendar__nav">
+          <button class="calendar__nav-btn" id="cal-prev" onclick="App.calPrevMonth()">‹</button>
+          <span class="calendar__month" id="cal-month-label"></span>
+          <button class="calendar__nav-btn" id="cal-next" onclick="App.calNextMonth()">›</button>
+        </div>
+        <div class="calendar__weekdays" id="cal-weekdays"></div>
+        <div class="calendar__days" id="cal-days"></div>
+      </div>
+
+      <!-- Таймзона -->
+      <div class="timezone-row">🌍 Москва, UTC+3</div>
+
+      <!-- Слоты -->
+      <div class="slots-section" id="slots-section"></div>
+
+    </div>
+    <button class="main-btn" id="picker-next-btn" disabled onclick="App.navigate('bookingConfirm')">
+      Далее
+    </button>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       ЭКРАН 5: ПОДТВЕРЖДЕНИЕ ЗАПИСИ
+  ════════════════════════════════════════════════════════════ -->
+  <div id="screen-booking-confirm" class="screen">
+    <div class="header">
+      <button class="header__back" onclick="App.back()">
+        <svg width="10" height="17" viewBox="0 0 10 17" fill="none">
+          <path d="M9 1L2 8.5L9 16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <span class="header__title">Подтверждение</span>
+    </div>
+    <div class="screen__body">
+
+      <!-- Карточка с деталями записи -->
+      <div class="confirm-card" id="confirm-details"></div>
+
+      <!-- Поле: имя пользователя -->
+      <div class="form-block" style="margin-top:16px">
+        <div class="form-label">Ваше имя</div>
+        <input class="form-input" id="confirm-name" type="text" placeholder="Имя" maxlength="60">
+      </div>
+
+      <!-- Поле: запрос (необязательно) -->
+      <div class="form-block">
+        <div class="form-label">Что хотите проработать? <span style="color:var(--hint)">(необязательно)</span></div>
+        <textarea class="form-input" id="confirm-request" rows="3" placeholder="Кратко опишите свой запрос…"></textarea>
+      </div>
+
+      <!-- Итого и политика -->
+      <div class="total-row">
+        <span class="total-row__label">Итого:</span>
+        <span class="total-row__price" id="confirm-total-price"></span>
+      </div>
+      <div class="policy-row">Бесплатная отмена за 24 часа до сессии</div>
+
+      <!-- Согласие на обработку данных (152-ФЗ) -->
+      <div class="consent-row" id="consent-row" onclick="App.toggleConsent()">
+        <div class="consent-checkbox" id="consent-checkbox"></div>
+        <div class="consent-text">
+          Согласен(а) на обработку персональных данных в соответствии с
+          <a href="#" onclick="event.stopPropagation()">Политикой конфиденциальности</a>
+        </div>
+      </div>
+
+      <div style="height:8px"></div>
+    </div>
+    <button class="main-btn" id="confirm-pay-btn" disabled onclick="App.navigate('payment')">
+      Подтвердить запись
+    </button>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       ЭКРАН 6: ОПЛАТА
+  ════════════════════════════════════════════════════════════ -->
+  <div id="screen-payment" class="screen">
+    <div class="payment-screen">
+      <div class="payment__spinner"></div>
+      <div class="payment__text" id="payment-text">Обрабатываем оплату…</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       ЭКРАН 7: УСПЕХ
+  ════════════════════════════════════════════════════════════ -->
+  <div id="screen-success" class="screen">
+    <div class="screen__body">
+      <div class="success-screen">
+        <div class="success__icon">✅</div>
+        <div class="success__title">Запись подтверждена!</div>
+        <div class="success__subtitle" id="success-subtitle"></div>
+
+        <!-- Карточка с деталями -->
+        <div class="confirm-card" id="success-details" style="width:100%;margin:0;text-align:left"></div>
+
+        <div class="success__hint">
+          Ссылка на видеозвонок придёт в чат<br>за час до начала сессии
+        </div>
+
+        <div class="success__actions">
+          <button class="btn-outline" onclick="App.addToCalendar()">
+            🗓 Добавить в календарь
+          </button>
+        </div>
+
+        <!-- Апсейл пакета (показывается только при одиночной сессии) -->
+        <div class="upsell-card" id="success-upsell" style="display:none">
+          <div class="upsell-card__title">🌱 Хотите закрепить результат?</div>
+          <div class="upsell-card__text">Пакет 5 сессий — 12 000 ₽. Экономия 3 000 ₽ (15%)</div>
+          <div class="upsell-card__actions">
+            <button class="btn-outline" onclick="App.showUpsellInfo()">Узнать подробнее</button>
+            <button class="btn-text" onclick="document.getElementById('success-upsell').style.display='none'">Пропустить</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <button class="main-btn" onclick="App.navigate('myBookings')">
+      Посмотреть мои записи
+    </button>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       ЭКРАН 8: МОИ ЗАПИСИ
+  ════════════════════════════════════════════════════════════ -->
+  <div id="screen-my-bookings" class="screen">
+    <div class="header">
+      <button class="header__back" onclick="App.back()">
+        <svg width="10" height="17" viewBox="0 0 10 17" fill="none">
+          <path d="M9 1L2 8.5L9 16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <span class="header__title">Мои записи</span>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn tab-btn--active" id="tab-upcoming" onclick="App.switchTab('upcoming')">Предстоящие</button>
+      <button class="tab-btn" id="tab-past" onclick="App.switchTab('past')">Прошедшие</button>
+    </div>
+
+    <div class="screen__body">
+      <div id="bookings-upcoming"></div>
+      <div id="bookings-past" style="display:none"></div>
+    </div>
+
+    <button class="main-btn" onclick="App.navigate('home')">
+      Записаться на сессию
+    </button>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       ЭКРАН 9: ПРОФИЛЬ СПЕЦИАЛИСТА
+  ════════════════════════════════════════════════════════════ -->
+  <div id="screen-profile" class="screen">
+    <div class="header">
+      <button class="header__back" onclick="App.back()">
+        <svg width="10" height="17" viewBox="0 0 10 17" fill="none">
+          <path d="M9 1L2 8.5L9 16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <span class="header__title">О специалисте</span>
+    </div>
+    <div class="screen__body">
+
+      <div class="profile__hero">
+        <div class="avatar avatar--xl" id="profile-avatar">ЕЧ</div>
+        <div class="profile__name" id="profile-name"></div>
+        <div class="profile__title" id="profile-title"></div>
+        <div class="home__meta" style="justify-content:center">
+          <span class="stars">★★★★★</span>
+          <span id="profile-rating"></span>
+        </div>
+        <div class="profile__meta">
+          <div class="profile__stat">
+            <div class="profile__stat-value" id="profile-clients"></div>
+            <div class="profile__stat-label">клиентов</div>
+          </div>
+          <div class="profile__stat">
+            <div class="profile__stat-value" id="profile-sessions"></div>
+            <div class="profile__stat-label">сессий</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-title">О себе</div>
+      <div class="about-text" id="profile-about"></div>
+
+      <div class="section-title" style="margin-top:20px">Специализации</div>
+      <div class="chips-row" style="padding:0 16px" id="profile-specs"></div>
+
+      <div class="section-title" style="margin-top:20px">Образование</div>
+      <div class="edu-list" id="profile-edu"></div>
+
+      <div class="section-title" style="margin-top:20px">Отзывы</div>
+      <div class="profile__reviews-preview" id="profile-reviews"></div>
+
+    </div>
+    <button class="main-btn" onclick="App.navigate('home')">
+      Записаться на сессию
+    </button>
+  </div>
+
+</div><!-- /#app -->
+
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
