@@ -28,10 +28,11 @@ const App = (() => {
     if (!tg) return;
     tg.ready();
     tg.expand();
-    // Читаем данные пользователя
     if (tg.initDataUnsafe?.user) {
       state.tgUser = tg.initDataUnsafe.user;
     }
+    // Регистрируем обработчик Back ОДИН РАЗ — иначе каждый navigate стекал бы новый
+    tg.BackButton.onClick(back);
   }
 
   /* ── Навигация ────────────────────────────────────────────── */
@@ -89,14 +90,10 @@ const App = (() => {
 
     state.currentScreen = to;
 
-    // Управляем кнопкой Back в Telegram
+    // Только показываем/скрываем — обработчик зарегистрирован один раз в initTelegram
     if (tg) {
-      if (state.history.length > 0) {
-        tg.BackButton.show();
-        tg.BackButton.onClick(() => back());
-      } else {
-        tg.BackButton.hide();
-      }
+      if (state.history.length > 0) tg.BackButton.show();
+      else tg.BackButton.hide();
     }
   }
 
@@ -133,7 +130,7 @@ const App = (() => {
       if (state.history.length > 0) tg.BackButton.show();
       else tg.BackButton.hide();
     }
-  }
+  } // end back()
 
   /* ── Рендеринг экранов ────────────────────────────────────── */
   function renderScreen(key) {
@@ -166,11 +163,11 @@ const App = (() => {
       list.innerHTML = DATA.services.map(svc => `
         <div class="service-card ${svc.price === 0 ? 'service-card--free' : ''}"
              onclick="App.selectService('${svc.id}')">
-          ${svc.badge ? `<span class="service-card__badge">${svc.badge}</span>` : ''}
           <div class="service-card__icon">${svc.icon}</div>
           <div class="service-card__info">
             <div class="service-card__name">${svc.name}</div>
             <div class="service-card__meta">${svc.duration} · ${svc.format}</div>
+            ${svc.badge ? `<span class="service-card__badge">${svc.badge}</span>` : ''}
           </div>
           <div class="service-card__price">${svc.priceLabel}</div>
         </div>
@@ -285,6 +282,16 @@ const App = (() => {
     const monthName = new Date(year, month, 1).toLocaleString('ru', { month: 'long', year: 'numeric' });
     set('cal-month-label', monthName[0].toUpperCase() + monthName.slice(1));
 
+    // Блокируем «‹» если уже текущий месяц
+    const now = new Date();
+    const prevBtn = document.getElementById('cal-prev');
+    if (prevBtn) {
+      const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
+      prevBtn.disabled = isCurrentMonth;
+      prevBtn.style.opacity = isCurrentMonth ? '0.25' : '1';
+      prevBtn.style.cursor  = isCurrentMonth ? 'default' : 'pointer';
+    }
+
     // Дни недели
     const weekDays = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
     document.getElementById('cal-weekdays').innerHTML =
@@ -376,9 +383,20 @@ const App = (() => {
     renderCalendar();
     renderSlots();
     haptic('impact');
+    // Скроллим к слотам — они появляются ниже календаря и могут быть не видны
+    setTimeout(() => {
+      const body    = document.querySelector('#screen-date-picker .screen__body');
+      const section = document.getElementById('slots-section');
+      if (body && section) {
+        body.scrollTo({ top: section.offsetTop - 8, behavior: 'smooth' });
+      }
+    }, 60);
   }
 
   function calPrevMonth() {
+    const now = new Date();
+    // Нельзя листать раньше текущего месяца
+    if (state.calYear === now.getFullYear() && state.calMonth === now.getMonth()) return;
     state.calMonth--;
     if (state.calMonth < 0) { state.calMonth = 11; state.calYear--; }
     state.selectedDate = null;
@@ -483,12 +501,19 @@ const App = (() => {
 
   /* ── ОПЛАТА (симуляция) ───────────────────────────────────── */
   function renderPayment() {
-    // Симулируем задержку обработки
     set('payment-text', 'Обрабатываем…');
     setTimeout(() => {
       saveBooking();
-      navigate('success');
+      // Сбрасываем стек флоу бронирования — назад вернёт на главную, не на платёж
+      state.history = ['home'];
+      navigate('success', true); // skipHistory=true: не пушим 'payment'
     }, 1800);
+  }
+
+  // Переход с экрана Успеха на Мои записи — не добавляет success в историю
+  function goToMyBookingsFromSuccess() {
+    state.history = ['home'];
+    navigate('myBookings', true);
   }
 
   function saveBooking() {
@@ -788,6 +813,7 @@ const App = (() => {
     goTab,
     addToCalendar,
     showUpsellInfo,
+    goToMyBookingsFromSuccess,
   };
 
 })();
