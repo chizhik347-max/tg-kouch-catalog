@@ -204,6 +204,14 @@ body {
   color: var(--accent-text);
   border-color: var(--accent);
 }
+.chip--tag {
+  background: transparent;
+  color: var(--hint);
+  border-color: var(--hint);
+  cursor: default;
+  pointer-events: none;
+  font-weight: 400;
+}
 .chip:active { opacity: 0.8; }
 
 /* ── Звёзды рейтинга ─────────────────────────────────────────── */

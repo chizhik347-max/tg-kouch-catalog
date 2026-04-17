@@ -274,7 +274,7 @@ const App = (() => {
       .join('');
 
     document.getElementById('detail-for-whom').innerHTML = svc.forWhom
-      .map(f => `<span class="chip chip--active" style="cursor:default">${f}</span>`)
+      .map(f => `<span class="chip chip--tag">${f}</span>`)
       .join('');
 
     set('detail-spec-name', s.name);
