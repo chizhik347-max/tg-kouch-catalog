@@ -35,6 +35,12 @@
     </div>
     <!-- Заголовок шага -->
     <div class="header">
+      <!-- Скрыт на шаге 1, появляется со 2-го -->
+      <button class="header__back" id="quiz-back-btn" onclick="App.quizBack()" style="visibility:hidden">
+        <svg width="10" height="17" viewBox="0 0 10 17" fill="none">
+          <path d="M9 1L2 8.5L9 16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
       <span class="header__title" id="quiz-step-label">Шаг 1 из 3</span>
     </div>
     <!-- Содержимое вопроса -->

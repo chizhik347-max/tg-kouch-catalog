@@ -387,6 +387,8 @@ body {
   color: var(--accent);
 }
 .service-card--free .service-card__price { color: var(--success); }
+.service-card--rec { border: 1.5px solid rgba(76,175,80,0.4); }
+.service-card__badge--green { background: rgba(76,175,80,0.15); color: var(--success); }
 .reviews-list { padding: 0 16px 24px; display: flex; flex-direction: column; gap: 10px; }
 .review-card { padding: 14px 16px; background: var(--bg-secondary); border-radius: var(--radius); }
 .review-card__header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }

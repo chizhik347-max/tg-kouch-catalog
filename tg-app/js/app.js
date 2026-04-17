@@ -10,6 +10,7 @@ const App = (() => {
     history: [],           // стек экранов для Back
     quizStep: 0,
     quizAnswers: [],
+    recommendedServiceId: null, // устанавливается после квиза
     selectedService: null,
     calYear: null,
     calMonth: null,
@@ -95,6 +96,7 @@ const App = (() => {
       if (state.history.length > 0) tg.BackButton.show();
       else tg.BackButton.hide();
     }
+    syncTabBar();
   }
 
   function back() {
@@ -130,6 +132,7 @@ const App = (() => {
       if (state.history.length > 0) tg.BackButton.show();
       else tg.BackButton.hide();
     }
+    syncTabBar();
   } // end back()
 
   /* ── Рендеринг экранов ────────────────────────────────────── */
@@ -156,25 +159,30 @@ const App = (() => {
     set('home-clients', `${s.clients}+ клиентов`);
     set('home-slot-text', `Ближайший слот: ${s.nextSlot}`);
 
-    // Услуги
+    // Услуги — рендерим каждый раз, чтобы учитывать рекомендацию после квиза
     const list = document.getElementById('home-services');
-    if (list && !list.dataset.rendered) {
-      list.dataset.rendered = '1';
-      list.innerHTML = DATA.services.map(svc => `
-        <div class="service-card ${svc.price === 0 ? 'service-card--free' : ''}"
-             onclick="App.selectService('${svc.id}')">
-          <div class="service-card__icon">${svc.icon}</div>
-          <div class="service-card__info">
-            <div class="service-card__name">${svc.name}</div>
-            <div class="service-card__meta">${svc.duration} · ${svc.format}</div>
-            ${svc.badge ? `<span class="service-card__badge">${svc.badge}</span>` : ''}
-          </div>
-          <div class="service-card__price">${svc.priceLabel}</div>
-        </div>
-      `).join('');
+    if (list) {
+      const recId = state.recommendedServiceId;
+      list.innerHTML = DATA.services.map(svc => {
+        const isRec = recId && svc.id === recId;
+        const badge = isRec
+          ? `<span class="service-card__badge service-card__badge--green">Рекомендуем для вас</span>`
+          : (svc.badge ? `<span class="service-card__badge">${svc.badge}</span>` : '');
+        return `
+          <div class="service-card ${svc.price === 0 ? 'service-card--free' : ''} ${isRec ? 'service-card--rec' : ''}"
+               onclick="App.selectService('${svc.id}')">
+            <div class="service-card__icon">${svc.icon}</div>
+            <div class="service-card__info">
+              <div class="service-card__name">${svc.name}</div>
+              <div class="service-card__meta">${svc.duration} · ${svc.format}</div>
+              ${badge}
+            </div>
+            <div class="service-card__price">${svc.priceLabel}</div>
+          </div>`;
+      }).join('');
     }
 
-    // Отзывы
+    // Отзывы — статичные, рендерим один раз
     const rev = document.getElementById('home-reviews');
     if (rev && !rev.dataset.rendered) {
       rev.dataset.rendered = '1';
@@ -192,6 +200,10 @@ const App = (() => {
     set('quiz-step-label', `Шаг ${step + 1} из ${DATA.quiz.length}`);
     set('quiz-question', q.question);
 
+    // Показываем Back только начиная со 2-го шага
+    const backBtn = document.getElementById('quiz-back-btn');
+    if (backBtn) backBtn.style.visibility = step > 0 ? 'visible' : 'hidden';
+
     const opts = document.getElementById('quiz-options');
     opts.innerHTML = q.options.map(opt => `
       <div class="chip" onclick="App.quizSelect(this, '${opt.replace(/'/g, "\\'")}')">${opt}</div>
@@ -201,6 +213,13 @@ const App = (() => {
     btn.disabled = true;
     btn.textContent = step < DATA.quiz.length - 1 ? 'Далее' : 'Перейти к услугам';
     btn.onclick = quizNext;
+  }
+
+  function quizBack() {
+    if (state.quizStep > 0) {
+      state.quizStep--;
+      renderQuiz();
+    }
   }
 
   function quizSelect(el, value) {
@@ -217,8 +236,18 @@ const App = (() => {
       state.quizStep++;
       renderQuiz();
     } else {
-      // Квиз завершён — сохраняем и идём на главную
       localStorage.setItem('quizDone', '1');
+      // Определяем рекомендацию по первому ответу (тема запроса)
+      const topicMap = {
+        'Тревога и стресс':    'individual',
+        'Отношения':           'individual',
+        'Работа и выгорание':  'package',
+        'Самооценка':          'individual',
+        'Жизненный кризис':    'package',
+        'Просто поговорить':   'trial',
+      };
+      state.recommendedServiceId = topicMap[state.quizAnswers[0]] || 'individual';
+      localStorage.setItem('recommendedServiceId', state.recommendedServiceId);
       navigate('home');
     }
   }
@@ -460,8 +489,7 @@ const App = (() => {
     const priceLabel = svc.price === 0 ? 'Бесплатно' : svc.priceLabel;
     set('confirm-total-price', priceLabel);
 
-    // Сбрасываем согласие и кнопку
-    state.consentGiven = false;
+    // Согласие уже сброшено в selectService — просто синхронизируем UI
     updateConsentUI();
 
     // Слушаем изменение поля имени
@@ -517,7 +545,7 @@ const App = (() => {
   }
 
   function saveBooking() {
-    const svc  = state.selectedService;
+    const svc = state.selectedService;
     state.bookings.unshift({
       id:       Date.now(),
       service:  svc.name,
@@ -527,6 +555,18 @@ const App = (() => {
       price:    svc.priceLabel,
       status:   'upcoming',
     });
+    persistBookings();
+  }
+
+  function persistBookings() {
+    try { localStorage.setItem('bookings', JSON.stringify(state.bookings)); } catch(e) {}
+  }
+
+  function loadBookings() {
+    try {
+      const raw = localStorage.getItem('bookings');
+      if (raw) state.bookings = JSON.parse(raw);
+    } catch(e) {}
   }
 
   /* ── УСПЕХ ────────────────────────────────────────────────── */
@@ -589,7 +629,7 @@ const App = (() => {
             <div class="booking-card__service">${b.service} · ${b.duration}</div>
             <div class="booking-card__actions">
               <button class="booking-card__rebooking" onclick="App.rebookSession('${b.id}')">
-                Перенести запись
+                Записаться снова
               </button>
               <button class="booking-card__cancel" onclick="App.cancelBooking(${b.id})">
                 Отменить
@@ -633,6 +673,7 @@ const App = (() => {
   function doCancel(id) {
     const b = state.bookings.find(b => b.id === id);
     if (b) { b.status = 'past'; }
+    persistBookings();
     renderMyBookings();
     haptic('notification');
   }
@@ -675,6 +716,15 @@ const App = (() => {
   }
 
   /* ── ТАББАР ГЛАВНОЙ ───────────────────────────────────────── */
+
+  // Вызывается после каждого navigate/back — держит подсветку актуальной
+  function syncTabBar() {
+    const s = state.currentScreen;
+    document.getElementById('nav-services')?.classList.toggle('bottom-nav__btn--active', s === 'home');
+    document.getElementById('nav-bookings')?.classList.toggle('bottom-nav__btn--active', s === 'myBookings');
+    document.getElementById('nav-profile')?.classList.toggle('bottom-nav__btn--active', s === 'profile');
+  }
+
   function goTab(tab) {
     ['services','bookings','profile'].forEach(t => {
       document.getElementById(`nav-${t}`)?.classList.toggle('bottom-nav__btn--active', t === tab);
@@ -740,8 +790,9 @@ const App = (() => {
     if (!date || !time) return;
     const [y, m, d] = date.split('-').map(Number);
     const [h, min]  = time.split(':').map(Number);
-    const start = new Date(y, m - 1, d, h, min);
-    const end   = new Date(start.getTime() + 60 * 60 * 1000);
+    const start       = new Date(y, m - 1, d, h, min);
+    const durationMin = state.selectedService?.durationMin || 60;
+    const end         = new Date(start.getTime() + durationMin * 60 * 1000);
 
     const fmt = dt => dt.toISOString().replace(/[-:]/g,'').split('.')[0] + 'Z';
     const url = `https://calendar.google.com/calendar/r/eventedit?text=${encodeURIComponent('Сессия с Еленой Чижик')}&dates=${fmt(start)}/${fmt(end)}`;
@@ -758,6 +809,8 @@ const App = (() => {
 
   function selectService(id) {
     state.selectedService = DATA.services.find(s => s.id === id);
+    // Сбрасываем согласие при выборе НОВОЙ услуги, а не при каждом рендере формы
+    state.consentGiven = false;
     navigate('serviceDetail');
   }
 
@@ -771,16 +824,19 @@ const App = (() => {
   function init() {
     initTelegram();
 
-    // Применяем цвета Telegram к body
     if (tg?.colorScheme === 'dark') {
       document.documentElement.setAttribute('data-theme', 'dark');
     }
 
-    // Пауза сплэша, потом переход
+    // Восстанавливаем данные из localStorage
+    loadBookings();
+    state.recommendedServiceId = localStorage.getItem('recommendedServiceId');
+
+    const quizDone = localStorage.getItem('quizDone');
+    // Возвращающимся пользователям — короткий сплэш (600 мс вместо 1400)
     setTimeout(() => {
-      const quizDone = localStorage.getItem('quizDone');
       navigate(quizDone ? 'home' : 'quiz', true);
-    }, 1400);
+    }, quizDone ? 600 : 1400);
   }
 
   // Перехват navigate('payment') — нужна симуляция
@@ -802,6 +858,7 @@ const App = (() => {
     back,
     selectService,
     quizSelect,
+    quizBack,
     calSelectDay,
     calPrevMonth,
     calNextMonth,
