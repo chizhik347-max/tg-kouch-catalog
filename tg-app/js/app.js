@@ -698,10 +698,10 @@ const App = (() => {
       </div>
     `;
 
-    // Апсейл — только для одиночной сессии
+    // Апсейл — для всех услуг кроме самого пакета
     const upsell = document.getElementById('success-upsell');
     if (upsell) {
-      upsell.style.display = svc?.id === 'individual' ? 'block' : 'none';
+      upsell.style.display = svc?.id !== 'package' ? 'block' : 'none';
     }
   }
 
