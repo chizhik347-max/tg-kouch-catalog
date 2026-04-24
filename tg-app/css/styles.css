@@ -339,6 +339,25 @@ body {
   font-weight: 600;
   margin-top: 8px;
 }
+.anxiety-promo {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 16px 16px 0;
+  padding: 14px 16px;
+  background: rgba(42,171,238,0.08);
+  border: 1.5px solid rgba(42,171,238,0.25);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: opacity var(--transition), transform 80ms;
+}
+.anxiety-promo:active { transform: scale(0.98); opacity: 0.85; }
+.anxiety-promo__emoji { font-size: 28px; flex-shrink: 0; }
+.anxiety-promo__info { flex: 1; min-width: 0; }
+.anxiety-promo__title { font-size: 15px; font-weight: 700; color: var(--accent); }
+.anxiety-promo__sub { font-size: 13px; color: var(--hint); margin-top: 2px; }
+.anxiety-promo__arrow { color: var(--accent); font-size: 22px; flex-shrink: 0; }
+
 .section-title {
   font-size: 13px;
   font-weight: 700;

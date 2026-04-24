@@ -342,6 +342,12 @@ const App = (() => {
     if (ctaBtn) ctaBtn.textContent = result.ctaText;
   }
 
+  function startAnxietyTest() {
+    state.anxietyStep = 0;
+    state.anxietyAnswers = [];
+    navigate('anxietyTest');
+  }
+
   function bookFromAnxietyResult() {
     const serviceId = state.anxietyResultServiceId || 'individual';
     state.selectedService = DATA.services.find(s => s.id === serviceId);
@@ -975,6 +981,7 @@ const App = (() => {
     anxietyBack,
     anxietySelect,
     bookFromAnxietyResult,
+    startAnxietyTest,
   };
 
 })();
