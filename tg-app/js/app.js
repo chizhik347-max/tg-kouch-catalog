@@ -10,6 +10,10 @@ const App = (() => {
     history: [],           // стек экранов для Back
     quizStep: 0,
     quizAnswers: [],
+    anxietyStep: 0,
+    anxietyAnswers: [],
+    anxietyScore: 0,
+    anxietyResultServiceId: null,
     recommendedServiceId: null, // устанавливается после квиза
     selectedService: null,
     calYear: null,
@@ -48,6 +52,8 @@ const App = (() => {
     success:         'screen-success',
     myBookings:      'screen-my-bookings',
     profile:         'screen-profile',
+    anxietyTest:     'screen-anxiety-test',
+    anxietyResult:   'screen-anxiety-result',
   };
 
   function getEl(screenKey) {
@@ -146,6 +152,8 @@ const App = (() => {
       case 'success':       renderSuccess();       break;
       case 'myBookings':    renderMyBookings();    break;
       case 'profile':       renderProfile();       break;
+      case 'anxietyTest':   renderAnxietyTest();   break;
+      case 'anxietyResult': renderAnxietyResult(); break;
       // payment рендерится отдельно в navigatePublic после перехода
     }
   }
@@ -248,8 +256,101 @@ const App = (() => {
       };
       state.recommendedServiceId = topicMap[state.quizAnswers[0]] || 'individual';
       localStorage.setItem('recommendedServiceId', state.recommendedServiceId);
-      navigate('home');
+      if (state.quizAnswers[0] === 'Тревога и стресс') {
+        state.anxietyStep = 0;
+        state.anxietyAnswers = [];
+        navigate('anxietyTest');
+      } else {
+        navigate('home');
+      }
     }
+  }
+
+  /* ── ТЕСТ ТРЕВОЖНОСТИ ────────────────────────────────────── */
+  function renderAnxietyTest() {
+    const test = DATA.anxietyTest;
+    const step = state.anxietyStep;
+    const pct  = Math.round(((step + 1) / test.questions.length) * 100);
+
+    document.getElementById('anxiety-progress-fill').style.width = pct + '%';
+    set('anxiety-step-label', `Вопрос ${step + 1} из ${test.questions.length}`);
+    set('anxiety-subtitle', test.subtitle);
+    set('anxiety-question', test.questions[step]);
+
+    const opts = document.getElementById('anxiety-options');
+    opts.innerHTML = test.options.map((opt, i) => `
+      <div class="anxiety-option" onclick="App.anxietySelect(this, ${i})">${opt}</div>
+    `).join('');
+
+    if (state.anxietyAnswers[step] !== undefined) {
+      opts.querySelectorAll('.anxiety-option')[state.anxietyAnswers[step]]
+        ?.classList.add('anxiety-option--active');
+    }
+
+    const btn = document.getElementById('anxiety-next-btn');
+    btn.disabled = state.anxietyAnswers[step] === undefined;
+    btn.textContent = step < test.questions.length - 1 ? 'Далее' : 'Узнать результат';
+    btn.onclick = anxietyNext;
+  }
+
+  function anxietyBack() {
+    if (state.anxietyStep > 0) {
+      state.anxietyStep--;
+      renderAnxietyTest();
+    } else {
+      back();
+    }
+  }
+
+  function anxietySelect(el, value) {
+    el.closest('#anxiety-options').querySelectorAll('.anxiety-option')
+      .forEach(c => c.classList.remove('anxiety-option--active'));
+    el.classList.add('anxiety-option--active');
+    state.anxietyAnswers[state.anxietyStep] = value;
+    document.getElementById('anxiety-next-btn').disabled = false;
+    haptic('selection');
+  }
+
+  function anxietyNext() {
+    const test = DATA.anxietyTest;
+    if (state.anxietyStep < test.questions.length - 1) {
+      state.anxietyStep++;
+      renderAnxietyTest();
+    } else {
+      state.anxietyScore = state.anxietyAnswers.reduce((sum, v) => sum + v, 0);
+      const result = test.results.find(r => state.anxietyScore >= r.min && state.anxietyScore <= r.max);
+      state.anxietyResultServiceId = result.serviceId;
+      navigate('anxietyResult');
+    }
+  }
+
+  function renderAnxietyResult() {
+    const test   = DATA.anxietyTest;
+    const score  = state.anxietyScore;
+    const result = test.results.find(r => score >= r.min && score <= r.max);
+
+    set('anxiety-result-emoji', result.emoji);
+    set('anxiety-result-level', result.level);
+    set('anxiety-result-score', String(score));
+    set('anxiety-result-description', result.description);
+    set('anxiety-result-recommendation', result.recommendation);
+
+    const barEl = document.getElementById('anxiety-result-bar');
+    if (barEl) barEl.style.width = Math.round((score / 21) * 100) + '%';
+
+    const ctaBtn = document.getElementById('anxiety-cta-btn');
+    if (ctaBtn) ctaBtn.textContent = result.ctaText;
+  }
+
+  function bookFromAnxietyResult() {
+    const serviceId = state.anxietyResultServiceId || 'individual';
+    state.selectedService = DATA.services.find(s => s.id === serviceId);
+    state.consentGiven = false;
+    state.selectedDate = null;
+    state.selectedTime = null;
+    state.calYear  = null;
+    state.calMonth = null;
+    navigate('datePicker');
   }
 
   /* ── ДЕТАЛИ УСЛУГИ ────────────────────────────────────────── */
@@ -871,6 +972,9 @@ const App = (() => {
     addToCalendar,
     showUpsellInfo,
     goToMyBookingsFromSuccess,
+    anxietyBack,
+    anxietySelect,
+    bookFromAnxietyResult,
   };
 
 })();

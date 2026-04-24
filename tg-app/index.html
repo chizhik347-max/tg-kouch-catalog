@@ -381,6 +381,58 @@
     </button>
   </div>
 
+
+  <!-- ═══════════════════════════════════════════════════════════
+       ЭКРАН 10: ТЕСТ ТРЕВОЖНОСТИ (GAD-7)
+  ════════════════════════════════════════════════════════════ -->
+  <div id="screen-anxiety-test" class="screen">
+    <div class="quiz__progress">
+      <div class="quiz__progress-fill" id="anxiety-progress-fill" style="width: 14%"></div>
+    </div>
+    <div class="header">
+      <button class="header__back" id="anxiety-back-btn" onclick="App.anxietyBack()">
+        <svg width="10" height="17" viewBox="0 0 10 17" fill="none">
+          <path d="M9 1L2 8.5L9 16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <span class="header__title" id="anxiety-step-label">Вопрос 1 из 7</span>
+    </div>
+    <div class="screen__body screen__body--padded">
+      <div class="anxiety-test__subtitle" id="anxiety-subtitle"></div>
+      <div class="quiz__question" id="anxiety-question"></div>
+      <div class="anxiety-test__options" id="anxiety-options"></div>
+    </div>
+    <button class="main-btn" id="anxiety-next-btn" disabled>Далее</button>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       ЭКРАН 11: РЕЗУЛЬТАТ ТЕСТА ТРЕВОЖНОСТИ
+  ════════════════════════════════════════════════════════════ -->
+  <div id="screen-anxiety-result" class="screen">
+    <div class="screen__body">
+      <div class="anxiety-result">
+        <div class="anxiety-result__emoji" id="anxiety-result-emoji"></div>
+        <div class="anxiety-result__level" id="anxiety-result-level"></div>
+        <div class="anxiety-result__score-row">
+          <span class="anxiety-result__score-num" id="anxiety-result-score"></span>
+          <span class="anxiety-result__score-max"> из 21 балла</span>
+        </div>
+        <div class="anxiety-result__bar-wrap">
+          <div class="anxiety-result__bar-fill" id="anxiety-result-bar"></div>
+        </div>
+        <div class="anxiety-result__description" id="anxiety-result-description"></div>
+        <div class="anxiety-result__rec-card">
+          <div class="anxiety-result__rec-label">Рекомендация Елены</div>
+          <div class="anxiety-result__rec-text" id="anxiety-result-recommendation"></div>
+        </div>
+        <div style="height: 24px"></div>
+      </div>
+    </div>
+    <button class="main-btn" id="anxiety-cta-btn" onclick="App.bookFromAnxietyResult()">
+      Записаться на сессию
+    </button>
+  </div>
+
 </div><!-- /#app -->
 
 <script src="js/data.js"></script>
