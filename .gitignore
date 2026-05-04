@@ -1,0 +1,13 @@
+# Секреты — никогда не коммитить
+.env
+
+# Зависимости
+node_modules/
+
+# Логи
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
