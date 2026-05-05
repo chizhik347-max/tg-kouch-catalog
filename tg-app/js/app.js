@@ -26,6 +26,8 @@ const App = (() => {
     tgUser: null,
   };
 
+  let _offerScheduled = false;
+
   /* ── Telegram SDK ─────────────────────────────────────────── */
   const tg = window.Telegram?.WebApp;
 
@@ -196,6 +198,8 @@ const App = (() => {
       rev.dataset.rendered = '1';
       rev.innerHTML = DATA.reviews.map(r => reviewCard(r)).join('');
     }
+
+    showOffer();
   }
 
   /* ── КВИЗ ─────────────────────────────────────────────────── */
@@ -927,6 +931,39 @@ const App = (() => {
     else    window.open(el.href, '_blank');
   }
 
+  /* ── ОФФЕР (первый запуск) ───────────────────────────────── */
+  function showOffer() {
+    if (localStorage.getItem('offerShown') || _offerScheduled) return;
+    _offerScheduled = true;
+    setTimeout(() => {
+      if (localStorage.getItem('offerShown')) return;
+      const overlay = document.getElementById('offer-overlay');
+      if (overlay) overlay.style.display = 'flex';
+    }, 350);
+  }
+
+  function closeOffer() {
+    localStorage.setItem('offerShown', '1');
+    const overlay = document.getElementById('offer-overlay');
+    if (!overlay) return;
+    overlay.style.opacity = '0';
+    overlay.style.transition = 'opacity 0.2s ease';
+    setTimeout(() => {
+      overlay.style.display = 'none';
+      overlay.style.opacity = '';
+      overlay.style.transition = '';
+    }, 200);
+  }
+
+  function offerCTA() {
+    const url = `https://t.me/${DATA.specialist.botHandle}?start=from_app`;
+    closeOffer();
+    setTimeout(() => {
+      if (tg) tg.openTelegramLink(url);
+      else window.open(url, '_blank');
+    }, 220);
+  }
+
   /* ── ИНИЦИАЛИЗАЦИЯ ────────────────────────────────────────── */
   function init() {
     initTelegram();
@@ -982,6 +1019,8 @@ const App = (() => {
     anxietySelect,
     bookFromAnxietyResult,
     startAnxietyTest,
+    closeOffer,
+    offerCTA,
   };
 
 })();

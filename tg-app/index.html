@@ -443,6 +443,26 @@
     </button>
   </div>
 
+
+  <!-- ═══════════════════════════════════════════════════════════
+       ОФФЕР: показывается один раз при первом открытии
+       localStorage-ключ: offerShown
+  ════════════════════════════════════════════════════════════ -->
+  <div id="offer-overlay" class="offer-overlay" style="display:none">
+    <div class="offer-card">
+      <div class="offer-emoji">🎁</div>
+      <h2 class="offer-title">Бесплатная пробная сессия 20 минут</h2>
+      <p class="offer-subtitle">Подпишитесь на бота — получите приглашение в личное сообщение</p>
+      <ul class="offer-bullets">
+        <li>Напомним о записи за день</li>
+        <li>Первыми узнаёте о свободных окошках</li>
+        <li>Эксклюзивные акции для подписчиков</li>
+      </ul>
+      <button class="offer-btn" onclick="App.offerCTA()">Пробная сессия</button>
+      <button class="offer-skip" onclick="App.closeOffer()">Пропустить</button>
+    </div>
+  </div>
+
 </div><!-- /#app -->
 
 <script src="js/data.js"></script>
