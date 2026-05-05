@@ -7,10 +7,6 @@
   <title>Елена Чижик — Психолог</title>
 
   <link rel="stylesheet" href="css/styles.css">
-  <link rel="preload" href="js/data.js" as="script">
-  <link rel="preload" href="js/app.js" as="script">
-  <!-- defer: HTML рендерится сразу, скрипты грузятся параллельно -->
-  <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
 </head>
 <body>
 <div id="app">
@@ -499,7 +495,9 @@
 
 </div><!-- /#app -->
 
-<script src="js/data.js" defer></script>
-<script src="js/app.js" defer></script>
+<!-- Скрипты в конце body: HTML рендерится сразу, скрипты не блокируют -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="js/data.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>
