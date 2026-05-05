@@ -1007,7 +1007,7 @@ const App = (() => {
       } else {
         navigate(quizDone ? 'home' : 'quiz', true);
       }
-    }, (welcomeDone || quizDone) ? 600 : 1400);
+    }, (welcomeDone || quizDone) ? 300 : 900);
   }
 
   // Перехват navigate('payment') — нужна симуляция
