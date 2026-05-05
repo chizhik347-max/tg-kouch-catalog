@@ -45,6 +45,7 @@ const App = (() => {
   /* ── Навигация ────────────────────────────────────────────── */
   const SCREEN_IDS = {
     splash:          'screen-splash',
+    welcome:         'screen-welcome',
     quiz:            'screen-quiz',
     home:            'screen-home',
     serviceDetail:   'screen-service-detail',
@@ -146,6 +147,7 @@ const App = (() => {
   /* ── Рендеринг экранов ────────────────────────────────────── */
   function renderScreen(key) {
     switch (key) {
+      case 'welcome':       renderWelcome();       break;
       case 'home':          renderHome();          break;
       case 'quiz':          renderQuiz();          break;
       case 'serviceDetail': renderServiceDetail(); break;
@@ -158,6 +160,17 @@ const App = (() => {
       case 'anxietyResult': renderAnxietyResult(); break;
       // payment рендерится отдельно в navigatePublic после перехода
     }
+  }
+
+  /* ── ПРИВЕТСТВИЕ ─────────────────────────────────────────── */
+  function renderWelcome() {
+    const name = state.tgUser?.first_name;
+    set('welcome-greeting', name ? `Привет, ${name}! 👋` : 'Привет! 👋');
+  }
+
+  function welcomeStart() {
+    localStorage.setItem('welcomeDone', '1');
+    navigate('quiz', true); // true = welcome не попадает в историю Back
   }
 
   /* ── ГЛАВНАЯ ──────────────────────────────────────────────── */
@@ -931,6 +944,15 @@ const App = (() => {
     else    window.open(el.href, '_blank');
   }
 
+  /* ── ПОДЕЛИТЬСЯ ──────────────────────────────────────────── */
+  function shareBot() {
+    const text = 'Нашла классного психолога — Елена Чижик 💙 Запись онлайн, всё удобно';
+    const url = `https://t.me/${DATA.specialist.botHandle}`;
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`;
+    if (tg) tg.openTelegramLink(shareUrl);
+    else window.open(shareUrl, '_blank');
+  }
+
   /* ── ОФФЕР (первый запуск) ───────────────────────────────── */
   function showOffer() {
     if (localStorage.getItem('offerShown') || _offerScheduled) return;
@@ -976,11 +998,16 @@ const App = (() => {
     loadBookings();
     state.recommendedServiceId = localStorage.getItem('recommendedServiceId');
 
-    const quizDone = localStorage.getItem('quizDone');
+    const welcomeDone = localStorage.getItem('welcomeDone');
+    const quizDone    = localStorage.getItem('quizDone');
     // Возвращающимся пользователям — короткий сплэш (600 мс вместо 1400)
     setTimeout(() => {
-      navigate(quizDone ? 'home' : 'quiz', true);
-    }, quizDone ? 600 : 1400);
+      if (!welcomeDone) {
+        navigate('welcome', true);
+      } else {
+        navigate(quizDone ? 'home' : 'quiz', true);
+      }
+    }, (welcomeDone || quizDone) ? 600 : 1400);
   }
 
   // Перехват navigate('payment') — нужна симуляция
@@ -1021,6 +1048,8 @@ const App = (() => {
     startAnxietyTest,
     closeOffer,
     offerCTA,
+    welcomeStart,
+    shareBot,
   };
 
 })();

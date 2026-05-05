@@ -26,7 +26,33 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════
-       ЭКРАН 1: ОНБОРДИНГ-КВИЗ
+       ЭКРАН 1: ПРИВЕТСТВИЕ (показывается один раз)
+  ════════════════════════════════════════════════════════════ -->
+  <div id="screen-welcome" class="screen">
+    <div class="screen__body welcome__body">
+      <div class="avatar avatar--xl">ЕЧ</div>
+      <div class="welcome__greeting" id="welcome-greeting">Привет! 👋</div>
+      <div class="welcome__subtitle">Рада видеть вас здесь</div>
+      <div class="welcome__features">
+        <div class="welcome__feature">
+          <span class="welcome__feature-icon">📅</span>
+          <span>Запись на психологическую сессию — онлайн, без звонков</span>
+        </div>
+        <div class="welcome__feature">
+          <span class="welcome__feature-icon">🧠</span>
+          <span>Тест тревожности GAD-7 — узнайте свой уровень за 2 минуты</span>
+        </div>
+        <div class="welcome__feature">
+          <span class="welcome__feature-icon">💬</span>
+          <span>Выберите формат и время, которое удобно именно вам</span>
+        </div>
+      </div>
+    </div>
+    <button class="main-btn" onclick="App.welcomeStart()">Начать</button>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       ЭКРАН 2: ОНБОРДИНГ-КВИЗ
   ════════════════════════════════════════════════════════════ -->
   <div id="screen-quiz" class="screen">
     <!-- Прогресс-бар -->
@@ -92,6 +118,13 @@
       <!-- Отзывы -->
       <div class="section-title">Отзывы</div>
       <div class="reviews-list" id="home-reviews"></div>
+
+      <!-- Поделиться -->
+      <div class="share-row">
+        <button class="share-btn" onclick="App.shareBot()">
+          🔗 Поделиться с другом
+        </button>
+      </div>
 
     </div>
 
