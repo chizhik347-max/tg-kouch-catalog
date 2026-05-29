@@ -1,420 +1,604 @@
-# BACKEND-PLAN.md — Backend для Telegram Mini App психолога
+# BACKEND-PLAN.md — Универсальная платформа для мастеров
 
-> Один специалист, три услуги, реальное расписание, оплата через Telegram.  
-> Документ описывает только то, что нужно **этому** приложению.
-
----
-
-## 1. Что сейчас работает на клиенте и что нужно перенести
-
-| Что сейчас | Где в коде | Проблема | Что делает backend |
-|---|---|---|---|
-| Занятость слотов — детерминированная формула `isSlotBooked()` | `data.js:192` | Не отражает реальные записи | Таблица `bookings` + `blocked_slots` |
-| Записи в `localStorage` | `app.js:668` | Пропадают при перезагрузке, не видны Елене | Таблица `bookings` в БД |
-| Оплата — setTimeout 1800мс | `app.js:638` | Деньги не списываются | Telegram Payments API + YooKassa |
-| Бот-сообщения — не реализованы | `brief.md:463` | Клиент не получает подтверждение | Bot webhook → sendMessage |
-| Идентификация пользователя — `initDataUnsafe` | `app.js:36` | Не верифицируется на сервере | HMAC-SHA256 проверка initData |
+> Один сервер, много мастеров, у каждого свой бот и своё Mini App.  
+> Мастер регистрируется сам, заполняет профиль через бота, клиенты видят только его.
 
 ---
 
-## 2. База данных
+## 0. Как это работает — одной картинкой
+
+```
+Мастер                     Платформа                    Клиент
+──────                     ─────────                    ──────
+1. Создаёт бота             /register <token>           4. Открывает бота мастера
+   в @BotFather          → регистрирует мастера         5. Видит его профиль
+2. Вводит токен          → ставит webhook               6. Записывается
+3. Заполняет профиль     → хранит данные                7. Платит
+   через своего бота     → уведомляет бота              8. Получает подтверждение
+```
+
+Каждый бот мастера — это и клиентский интерфейс, и его личная CRM.
+
+---
+
+## 1. База данных
+
+### Таблица `masters`
+
+Один мастер = одна строка. Центральная таблица платформы.
+
+```sql
+CREATE TABLE masters (
+  id                SERIAL PRIMARY KEY,
+  bot_token         VARCHAR(120) NOT NULL UNIQUE,  -- токен от @BotFather
+  bot_username      VARCHAR(60),                   -- username бота (из getMe)
+  admin_tg_user_id  BIGINT NOT NULL UNIQUE,        -- tg_user_id владельца
+  
+  -- Профиль (заполняет мастер)
+  name              VARCHAR(100) NOT NULL DEFAULT '',
+  first_name        VARCHAR(50)  NOT NULL DEFAULT '',
+  initials          VARCHAR(5)   NOT NULL DEFAULT '',
+  title             VARCHAR(150) NOT NULL DEFAULT '',
+  about             TEXT         NOT NULL DEFAULT '',
+  photo_url         VARCHAR(500),                  -- прямая ссылка на фото
+  contact_handle    VARCHAR(60),                   -- @username мастера в TG
+  
+  -- Статистика (обновляется мастером вручную)
+  rating            NUMERIC(3,1) NOT NULL DEFAULT 5.0,
+  clients_count     INT          NOT NULL DEFAULT 0,
+  sessions_count    INT          NOT NULL DEFAULT 0,
+  
+  -- Специализации и образование
+  specializations   TEXT[]       NOT NULL DEFAULT '{}',
+  education         JSONB        NOT NULL DEFAULT '[]',
+  -- Формат: [{"icon": "🎓", "text": "МГУ, 2015"}]
+  
+  -- Состояние онбординга
+  setup_step        VARCHAR(20)  NOT NULL DEFAULT 'token',
+  -- 'token' → 'profile' → 'services' → 'schedule' → 'done'
+  is_active         BOOLEAN      NOT NULL DEFAULT FALSE,
+  
+  created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+```
+
+---
+
+### Таблица `services`
+
+Каждый мастер настраивает свои услуги. Нет ограничения на тип ниши.
+
+```sql
+CREATE TABLE services (
+  id           SERIAL PRIMARY KEY,
+  master_id    INT          NOT NULL REFERENCES masters(id) ON DELETE CASCADE,
+  service_key  VARCHAR(40)  NOT NULL,      -- 'trial' | 'consultation' | любой
+  name         VARCHAR(100) NOT NULL,
+  duration_min INT          NOT NULL DEFAULT 60,
+  price        INT          NOT NULL DEFAULT 0,   -- в рублях, 0 = бесплатно
+  format       VARCHAR(50)  NOT NULL DEFAULT 'Онлайн',
+  icon         VARCHAR(10)  NOT NULL DEFAULT '💼',
+  badge        VARCHAR(80),                -- «Популярное», «+бонус» и т.д.
+  description  TEXT,
+  includes     TEXT[]       NOT NULL DEFAULT '{}',
+  for_whom     TEXT[]       NOT NULL DEFAULT '{}',
+  sort_order   SMALLINT     NOT NULL DEFAULT 0,
+  is_active    BOOLEAN      NOT NULL DEFAULT TRUE,
+
+  UNIQUE (master_id, service_key)
+);
+```
+
+---
+
+### Таблица `reviews`
+
+Отзывы добавляет мастер (через бота), чтобы витрина выглядела живой.
+
+```sql
+CREATE TABLE reviews (
+  id          SERIAL PRIMARY KEY,
+  master_id   INT          NOT NULL REFERENCES masters(id) ON DELETE CASCADE,
+  client_name VARCHAR(80)  NOT NULL,
+  rating      SMALLINT     NOT NULL DEFAULT 5 CHECK (rating BETWEEN 1 AND 5),
+  text        TEXT         NOT NULL,
+  date_label  VARCHAR(40)  NOT NULL DEFAULT '2 недели назад',
+  sort_order  SMALLINT     NOT NULL DEFAULT 0,
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+```
+
+---
+
+### Таблица `schedule`
+
+Одна строка на мастера — его рабочие дни и слоты.
+
+```sql
+CREATE TABLE schedule (
+  master_id          INT     NOT NULL PRIMARY KEY REFERENCES masters(id) ON DELETE CASCADE,
+  available_weekdays INT[]   NOT NULL DEFAULT '{1,2,3,4,5,6}',
+  -- 0=Вс, 1=Пн … 6=Сб
+  time_slots         TEXT[]  NOT NULL DEFAULT '{10:00,11:00,13:00,14:00,18:00,19:00,20:00}',
+  next_slot_label    VARCHAR(60) NOT NULL DEFAULT 'скоро'
+  -- Мастер сам обновляет: «сегодня 19:00», «завтра 10:00»
+);
+```
+
+---
 
 ### Таблица `bookings`
 
-Основная таблица — одна запись = одна сессия.
+Все записи всех мастеров — разделяются по `master_id`.
 
 ```sql
 CREATE TABLE bookings (
-  id                        SERIAL PRIMARY KEY,
-  tg_user_id                BIGINT NOT NULL,           -- из initDataUnsafe.user.id
-  client_name               VARCHAR(100) NOT NULL,     -- из поля confirm-name
-  client_request            TEXT,                      -- из confirm-request (необязательно)
-  service_id                VARCHAR(20) NOT NULL,      -- 'trial' | 'individual' | 'package'
-  date                      DATE NOT NULL,             -- 'YYYY-MM-DD'
-  time                      VARCHAR(5) NOT NULL,       -- '10:00' | '11:00' | ... | '20:00'
-  status                    VARCHAR(20) NOT NULL DEFAULT 'upcoming',
-                                                       -- 'upcoming' | 'past' | 'cancelled'
-  payment_status            VARCHAR(20) NOT NULL DEFAULT 'free',
-                                                       -- 'free' | 'pending' | 'paid' | 'refunded'
-  tg_payment_charge_id      VARCHAR(100),              -- из successful_payment Telegram
-  created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (date, time, status)                          -- один слот — одна активная запись
+  id                    SERIAL PRIMARY KEY,
+  master_id             INT          NOT NULL REFERENCES masters(id),
+  tg_user_id            BIGINT       NOT NULL,
+  client_name           VARCHAR(100) NOT NULL,
+  client_request        TEXT,
+  service_id            INT          NOT NULL REFERENCES services(id),
+  date                  DATE         NOT NULL,
+  time                  VARCHAR(5)   NOT NULL,
+  status                VARCHAR(20)  NOT NULL DEFAULT 'upcoming',
+  -- 'upcoming' | 'past' | 'cancelled'
+  payment_status        VARCHAR(20)  NOT NULL DEFAULT 'free',
+  -- 'free' | 'pending' | 'paid' | 'refunded'
+  tg_payment_charge_id  VARCHAR(100),
+  reminder_24h_sent     BOOLEAN      NOT NULL DEFAULT FALSE,
+  reminder_1h_sent      BOOLEAN      NOT NULL DEFAULT FALSE,
+  meet_link             VARCHAR(300),
+  created_at            TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX ON bookings (tg_user_id);
-CREATE INDEX ON bookings (date, status);
-```
-
-**Значения `service_id`** берутся из `DATA.services[].id` в `data.js`: `trial`, `individual`, `package`.
-
-**Значения `time`** берутся из `DATA.timeSlots` в `data.js`: `10:00`, `11:00`, `13:00`, `14:00`, `18:00`, `19:00`, `20:00`.
-
-**Ограничение UNIQUE** на `(date, time, status='upcoming')` реализуется через partial unique index:
-```sql
+-- Один активный слот = одна запись
 CREATE UNIQUE INDEX bookings_slot_unique
-  ON bookings (date, time)
+  ON bookings (master_id, date, time)
   WHERE status = 'upcoming';
+
+CREATE INDEX ON bookings (master_id, tg_user_id);
+CREATE INDEX ON bookings (master_id, date, status);
 ```
 
 ---
 
 ### Таблица `blocked_slots`
 
-Елена блокирует конкретные слоты вручную — отпуск, болезнь, личное.
+Мастер блокирует конкретные дни или слоты — отпуск, болезнь, личное.
 
 ```sql
 CREATE TABLE blocked_slots (
-  id         SERIAL PRIMARY KEY,
-  date       DATE NOT NULL,
-  time       VARCHAR(5),          -- NULL = весь день заблокирован
-  reason     VARCHAR(200),        -- для себя, клиенту не показывается
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (date, time)
+  id          SERIAL PRIMARY KEY,
+  master_id   INT         NOT NULL REFERENCES masters(id) ON DELETE CASCADE,
+  date        DATE        NOT NULL,
+  time        VARCHAR(5),             -- NULL = весь день заблокирован
+  reason      VARCHAR(200),           -- только мастеру, клиент не видит
+  UNIQUE (master_id, date, time)
 );
 ```
 
 ---
 
-### Таблица `schedule_settings`
+## 2. API (клиентская часть — Mini App)
 
-Одна строка — настройки расписания. Сейчас захардкожены в `data.js:187–189`, но нужны в БД чтобы Елена могла менять их без деплоя.
-
-```sql
-CREATE TABLE schedule_settings (
-  id                  INTEGER PRIMARY KEY DEFAULT 1,  -- всегда одна строка
-  available_weekdays  INTEGER[] NOT NULL DEFAULT '{1,2,3,4,5,6}',
-                                                      -- 0=Вс, 1=Пн … 6=Сб
-  time_slots          VARCHAR(5)[] NOT NULL DEFAULT '{"10:00","11:00","13:00","14:00","18:00","19:00","20:00"}'
-);
-
-INSERT INTO schedule_settings DEFAULT VALUES;          -- создать единственную строку при миграции
+Все запросы от Mini App идут с заголовком:
 ```
+X-Telegram-Init-Data: <raw initData string>
+```
+Бэкенд верифицирует HMAC-SHA256 и извлекает `user.id` и `start_param` (= master_id).
 
 ---
 
-## 3. API
+### `GET /api/master/:masterId`
 
-### Аутентификация
-
-Все клиентские запросы передают заголовок:
-```
-X-Telegram-Init-Data: <строка initData из window.Telegram.WebApp.initData>
-```
-
-Сервер верифицирует каждый запрос:
-```
-data_check_string = все поля initData кроме hash, отсортированные и соединённые \n
-secret_key = HMAC-SHA256(bot_token, "WebAppData")
-valid = HMAC-SHA256(secret_key, data_check_string) === hash
-```
-
-После верификации из `initData` извлекается `user.id` — это и есть идентификатор клиента.
-
-Для **admin-эндпоинтов** дополнительно: `user.id === ELENA_TG_USER_ID` (переменная окружения).
-
----
-
-### Клиентские эндпоинты
-
-#### `GET /api/slots?date=YYYY-MM-DD`
-
-Возвращает занятость слотов на конкретную дату. Заменяет `DATA.isSlotBooked()` в `renderSlots()` (`app.js:485`).
-
-**Логика:**
-1. Получить `schedule_settings.time_slots`
-2. Проверить: дата входит в `available_weekdays`? Если нет — все слоты недоступны
-3. Запросить `bookings` где `date = $date AND status = 'upcoming'`
-4. Запросить `blocked_slots` где `date = $date`
-5. Для каждого слота: `available = не в bookings AND не в blocked_slots`
+Возвращает всё для первой загрузки Mini App.
 
 **Ответ:**
 ```json
 {
-  "date": "2026-04-28",
+  "specialist": {
+    "name": "Иван Иванов",
+    "firstName": "Иван",
+    "initials": "ИИ",
+    "title": "Массажист",
+    "about": "...",
+    "photo_url": "https://...",
+    "rating": 4.9,
+    "clients": 150,
+    "sessions": 400,
+    "nextSlot": "сегодня 18:00",
+    "contactHandle": "ivan_massage",
+    "botHandle": "ivan_massage_bot"
+  },
+  "services": [...],
+  "reviews": [...],
+  "schedule": {
+    "availableWeekdays": [1,2,3,4,5,6],
+    "timeSlots": ["10:00", "11:00", ...]
+  }
+}
+```
+
+---
+
+### `GET /api/master/:masterId/slots?date=YYYY-MM-DD`
+
+Возвращает какие слоты свободны в конкретную дату.
+
+**Ответ:**
+```json
+{
+  "date": "2026-05-15",
   "slots": [
     { "time": "10:00", "available": true },
     { "time": "11:00", "available": false },
-    { "time": "13:00", "available": true },
-    { "time": "14:00", "available": false },
-    { "time": "18:00", "available": true },
-    { "time": "19:00", "available": true },
-    { "time": "20:00", "available": false }
+    { "time": "13:00", "available": true }
   ]
 }
 ```
 
-**Ошибки:** `400` если дата в прошлом или неверный формат.
-
 ---
 
-#### `POST /api/bookings`
+### `POST /api/master/:masterId/bookings`
 
-Создать запись. Вызывается когда пользователь нажимает «Оплатить» / «Подтвердить запись». Заменяет `renderPayment()` в `app.js:638`.
+Создать запись. Требует initData в заголовке.
 
-**Тело запроса:**
+**Тело:**
 ```json
 {
-  "service_id": "individual",
-  "date": "2026-04-28",
-  "time": "19:00",
-  "client_name": "Иван",
-  "client_request": "Тревога на работе"
+  "serviceId": 42,
+  "date": "2026-05-15",
+  "time": "10:00",
+  "clientName": "Анна",
+  "clientRequest": "Хочу снять напряжение в спине"
 }
 ```
 
-**Логика для `trial` (price = 0):**
-1. Проверить слот свободен (SELECT FOR UPDATE чтобы избежать race condition)
-2. Вставить booking со статусом `upcoming`, `payment_status = 'free'`
-3. Отправить боту команду → бот пишет клиенту подтверждение
-4. Вернуть `{ booking_id, status: 'confirmed' }`
+**Ответ 201:**
+```json
+{
+  "bookingId": 123,
+  "paymentRequired": true,
+  "invoiceUrl": "...",   // если платная услуга — Telegram Invoice URL
+  "message": "Запись создана"
+}
+```
 
-**Логика для `individual` и `package` (price > 0):**
-1. Проверить слот свободен
-2. Вставить booking со статусом `upcoming`, `payment_status = 'pending'`
-3. Создать invoice через Telegram Bot API (`sendInvoice`) с `payload = booking_id`
-4. Вернуть `{ booking_id, invoice_link: "https://t.me/$bot?start=pay_..." }`
-5. Фронтенд открывает invoice через `tg.openInvoice(invoice_link)`
-
-**Ошибки:**
-- `409` — слот уже занят (race condition)
-- `400` — неверный `service_id` или дата в прошлом
-- `422` — дата не рабочий день
+**Логика:**
+1. Проверить initData
+2. Проверить что слот свободен (иначе 409 Conflict)
+3. Создать booking со статусом `pending` (платная) или `upcoming` (бесплатная)
+4. Для платной — создать инвойс через Telegram Payments, вернуть URL
+5. Уведомить мастера через его бота: «Новая запись от Анны»
 
 ---
 
-#### `GET /api/bookings/my`
+### `GET /api/master/:masterId/bookings`
 
-Список записей текущего пользователя. Заменяет `loadBookings()` из `localStorage` (`app.js:672`).
+Записи текущего пользователя (по `tg_user_id` из initData).
 
 **Ответ:**
 ```json
 {
   "bookings": [
     {
-      "id": 42,
-      "service_id": "individual",
-      "service_name": "Индивидуальная сессия",
+      "id": 123,
+      "service": "Индивидуальная сессия",
       "duration": "60 мин",
-      "date": "2026-04-28",
-      "time": "19:00",
-      "price_label": "5 000 ₽",
+      "date": "2026-05-15",
+      "time": "10:00",
       "status": "upcoming",
-      "payment_status": "paid"
+      "paymentStatus": "paid"
     }
   ]
 }
 ```
 
-Поля `service_name`, `duration`, `price_label` возвращает сервер (берёт из словаря услуг) — фронтенду не нужно хранить их отдельно.
-
 ---
 
-#### `PATCH /api/bookings/:id/cancel`
+### `PATCH /api/master/:masterId/bookings/:id/cancel`
 
-Отмена записи. Вызывается из `doCancel()` в `app.js:673`.
+Отменить запись. Только своя запись (проверка по `tg_user_id`).
 
-**Правила:**
-- Только если `tg_user_id` из initData совпадает с владельцем записи
-- Только если `status = 'upcoming'`
-- Меняет `status → 'cancelled'`
-- Если `payment_status = 'paid'` — **не делает автовозврат** (в v1; логику возврата через YooKassa добавить в v2)
-
-**Ответ:** `{ "ok": true }`
-
-**Ошибки:** `403` если чужая запись, `409` если статус не `upcoming`.
-
----
-
-### Telegram Bot Webhook
-
-#### `POST /bot/webhook`
-
-Единственный endpoint для всех событий от Telegram Bot API.
-
-**`pre_checkout_query`** — Telegram спрашивает разрешение списать деньги:
-1. Извлечь `payload` (= `booking_id`)
-2. Проверить: запись существует, `payment_status = 'pending'`, слот ещё свободен
-3. Ответить `answerPreCheckoutQuery(ok: true)` — иначе оплата не пройдёт
-
-**`successful_payment`** — деньги списаны:
-1. Извлечь `payload` (= `booking_id`), `telegram_payment_charge_id`
-2. Обновить: `payment_status → 'paid'`, сохранить `tg_payment_charge_id`
-3. Отправить клиенту сообщение в чат:
-   ```
-   ✅ Запись подтверждена!
-   
-   📅 Пн, 28 апреля · 19:00 — 20:00
-   💼 Индивидуальная сессия, 60 мин
-   🌐 Онлайн — Telegram Video
-   
-   Ссылка на видеозвонок придёт за час до начала.
-   ```
-4. Запланировать напоминание за 24 ч и за 1 ч (см. раздел 5)
-
----
-
-### Админ-эндпоинты (только Елена)
-
-Доступны если `user.id из initData === ELENA_TG_USER_ID`.
-
-#### `GET /admin/bookings`
-
-Все записи, отсортированные по `date ASC, time ASC`. Опциональные фильтры: `?status=upcoming`, `?date=2026-04-28`.
-
-**Ответ:** массив booking-объектов с `client_name`, `client_request`, `tg_user_id`, `payment_status`.
-
----
-
-#### `GET /admin/slots/blocked`
-
-Список заблокированных слотов. Опционально: `?from=2026-04-28&to=2026-05-05`.
-
----
-
-#### `POST /admin/slots/block`
-
-Заблокировать слот или весь день.
-
-**Тело:**
+**Ответ 200:**
 ```json
-{ "date": "2026-05-01", "time": "19:00", "reason": "Личное" }
+{ "status": "cancelled" }
 ```
-Если `time` не передан — блокируется весь день (`time = NULL` в `blocked_slots`).
 
 ---
 
-#### `DELETE /admin/slots/block/:id`
+### `POST /api/master/:masterId/webhook/payment`
 
-Разблокировать слот.
+Telegram отправляет `pre_checkout_query` и `successful_payment`.
+
+**pre_checkout_query:**
+```
+→ Ответить answerPreCheckoutQuery(ok: true) в течение 10 сек
+```
+
+**successful_payment:**
+```
+→ Обновить booking.payment_status = 'paid'
+→ Обновить booking.status = 'upcoming'
+→ Обновить booking.tg_payment_charge_id
+→ Отправить клиенту: «Оплата прошла, ждём вас!»
+→ Уведомить мастера: «Оплата получена от Анны»
+```
 
 ---
 
-#### `PATCH /admin/settings`
+## 3. Webhook-роутинг для мультимастеров
 
-Изменить рабочие дни или временные слоты.
+Каждый бот мастера ставит свой webhook на уникальный URL:
 
-**Тело:**
-```json
-{
-  "available_weekdays": [1, 2, 3, 4, 5],
-  "time_slots": ["10:00", "13:00", "18:00", "19:00", "20:00"]
+```
+https://api.platform.com/bot/:masterBotToken/webhook
+```
+
+**Пример кода роутера:**
+```js
+app.post('/bot/:token/webhook', async (req, res) => {
+  const master = await db.masters.findOne({ botToken: req.params.token });
+  if (!master) return res.sendStatus(404);
+  
+  await handleUpdate(master, req.body);
+  res.sendStatus(200);
+});
+```
+
+Все команды от клиентов и мастера обрабатываются в `handleUpdate(master, update)`.
+
+---
+
+## 4. Регистрация мастера
+
+Мастер сам регистрируется — через бот платформы (один общий бот для онбординга).
+
+### Шаги онбординга
+
+**Шаг 1 — Токен**
+```
+Мастер → /start → «Привет! Чтобы создать своё приложение, пришли токен бота из @BotFather»
+Мастер → токен бота
+Платформа:
+  1. Проверить токен через getMe
+  2. Создать запись в masters
+  3. Поставить webhook: setWebhook(url=api.platform/bot/{token}/webhook)
+  4. Ответить: «Отлично! Теперь настроим профиль»
+```
+
+**Шаг 2 — Профиль**
+Серия вопросов через бота (ReplyKeyboardMarkup или просто текст):
+- Как вас зовут? → `masters.name`
+- Ваша специализация? → `masters.title`
+- Ссылка на фото (прямой URL)? → `masters.photo_url`
+- Расскажите о себе (2-3 абзаца)? → `masters.about`
+
+**Шаг 3 — Услуги**
+- Назовите первую услугу: `{название} {длительность} {цена}`
+  Пример: «Массаж 60 мин 3000»
+- Добавить ещё? → повтор
+- Хватит → переход к расписанию
+
+**Шаг 4 — Расписание**
+- В какие дни принимаете? (Пн–Пт / Пн–Сб / Все)
+- В какое время? (вводит список: 10:00 12:00 15:00 18:00)
+
+**Шаг 5 — Готово**
+```
+Платформа:
+  1. setChatMenuButton → кнопка «ЗАПИСАТЬСЯ» → https://platform.com/app/{master_id}
+  2. setMyDescription / setMyCommands для бота мастера
+  3. Отправить мастеру:
+     «Готово! Ссылка на ваше приложение: t.me/your_bot
+      Ссылка для поделиться: https://platform.com/app/123
+      Отправьте её своим клиентам.»
+```
+
+---
+
+## 5. Команды мастера в своём боте
+
+Бот мастера — это его CRM. Распознаём, что это мастер, по `tg_user_id == master.admin_tg_user_id`.
+
+| Команда | Что делает |
+|---|---|
+| `/dashboard` | Показывает: записей на сегодня N, всего активных M |
+| `/bookings` | Список предстоящих записей с именами и временем |
+| `/block 2026-05-15` | Заблокировать весь день |
+| `/block 2026-05-15 10:00` | Заблокировать конкретный слот |
+| `/addreview` | Запускает диалог добавления отзыва |
+| `/editprofile` | Запускает диалог редактирования профиля |
+| `/link` | Отправляет ссылку на приложение (поделиться) |
+| `/stats` | Статистика: клиентов за месяц, доход (если есть оплата) |
+
+---
+
+## 6. Уведомления клиенту
+
+Все уведомления идут от бота мастера (не от платформы) — клиент видит «Бот психолога», «Бот массажиста» и т.д.
+
+| Событие | Сообщение |
+|---|---|
+| Запись создана | «Запись подтверждена! [дата и время], [услуга]. Ссылка на звонок придёт за час.» |
+| Оплата получена | «Оплата прошла ✓ Ждём вас [дата]!» |
+| Напоминание за 24 ч | «Напоминаем: завтра в [время] сессия с [имя мастера]» |
+| Напоминание за 1 ч | «Через час начинается ваша сессия. [meet_link]» |
+| Отмена | «Ваша запись на [дата] отменена.» |
+
+---
+
+## 7. Frontend — изменения в Mini App
+
+Mini App нужно адаптировать под мультимастера. Текущий `data.js` заменяется API-запросом.
+
+### Как Mini App узнаёт, чьё это приложение
+
+Два варианта (используем оба как fallback):
+
+1. **`start_param` в initData** — мастер делится ссылкой `t.me/bot?start=app_{master_id}`, Mini App читает `tg.initDataUnsafe.start_param`
+2. **URL параметр** — `https://platform.com/app?master=123`
+
+### Что меняется в app.js
+
+**Было:**
+```js
+// Данные из data.js (статика)
+const DATA = { specialist: {...}, services: [...] };
+```
+
+**Станет:**
+```js
+async function loadMasterData(masterId) {
+  const res = await fetch(`/api/master/${masterId}`, {
+    headers: { 'X-Telegram-Init-Data': tg.initData }
+  });
+  return res.json();
+}
+```
+
+### Что показывает App если фото есть
+
+Текущие инициалы (ЕЧ) заменяются на `<img>` если есть `photo_url`:
+```js
+// В renderHome(), renderProfile():
+if (s.photo_url) {
+  avatarEl.innerHTML = `<img src="${s.photo_url}" alt="${s.initials}">`;
+} else {
+  avatarEl.textContent = s.initials;
 }
 ```
 
 ---
 
-## 4. Telegram Payments — полный флоу
+## 8. Telegram Payments — полный поток
+
+Каждый мастер подключает свой платёжный провайдер в @BotFather → Payments.
 
 ```
-Клиент нажимает «Оплатить 5 000 ₽»
-     │
-     ▼
-POST /api/bookings
-  → запись создана (status=upcoming, payment_status=pending)
-  → сервер вызывает bot.sendInvoice(user_id, { payload: booking_id, ... })
-  → возвращает { invoice_link }
-     │
-     ▼
-Фронтенд: tg.openInvoice(invoice_link)
-  → пользователь видит нативный платёжный экран Telegram
-     │
-     ▼
-Telegram → POST /bot/webhook { pre_checkout_query }
-  → сервер проверяет booking_id, слот свободен
-  → answerPreCheckoutQuery(ok: true)
-     │
-     ▼
-Пользователь подтверждает оплату в Telegram
-     │
-     ▼
-Telegram → POST /bot/webhook { successful_payment }
-  → payment_status → 'paid'
-  → бот пишет подтверждение в чат
-  → планируются напоминания
-     │
-     ▼
-Фронтенд: WebApp.onEvent('invoiceClosed', ({ status }) => {
-  if (status === 'paid') navigate('success')
-})
-```
-
-**Провайдер оплаты:** YooKassa (подключается в BotFather как Payments Provider).
-
-**Для пробной сессии (price = 0):** invoice не создаётся. После `POST /api/bookings` сервер сразу создаёт подтверждённую запись и пишет клиенту. Фронтенд переходит на экран успеха напрямую.
-
----
-
-## 5. Бот-уведомления
-
-Все уведомления отправляются через `bot.sendMessage(tg_user_id, text)`.
-
-| Триггер | Когда | Текст |
-|---|---|---|
-| Запись подтверждена | Сразу после `successful_payment` или после создания пробной | ✅ с деталями сессии |
-| Напоминание | За 24 ч до `date + time` | «Завтра в 19:00 — сессия с Еленой. Всё в силе?» |
-| Ссылка на встречу | За 1 ч до `date + time` | «Через час ваша сессия. Ссылка: [ссылка]» |
-| Запись отменена клиентом | После `PATCH /bookings/:id/cancel` | «Ваша запись на 28 апреля отменена» |
-
-**Реализация напоминаний:** node-cron-задача, которая каждые 5 минут проверяет `bookings` и отправляет уведомления для записей у которых `date + time` входит в нужный интервал и флаг `reminder_24h_sent` / `reminder_1h_sent` ещё не установлен.
-
-Добавить в таблицу `bookings`:
-```sql
-ALTER TABLE bookings ADD COLUMN reminder_24h_sent BOOLEAN NOT NULL DEFAULT FALSE;
-ALTER TABLE bookings ADD COLUMN reminder_1h_sent  BOOLEAN NOT NULL DEFAULT FALSE;
-ALTER TABLE bookings ADD COLUMN meet_link         VARCHAR(500);  -- ссылка на видеозвонок
+Клиент нажимает «Оплатить» в Mini App
+      ↓
+POST /api/master/:id/bookings → создаёт booking(status=pending)
+      ↓
+Backend → sendInvoice(chat_id, title, prices, payload="booking:{id}")
+      ↓
+Telegram показывает экран оплаты (YooKassa/Stripe)
+      ↓
+Telegram → pre_checkout_query → backend отвечает ok:true
+      ↓
+Telegram → successful_payment → backend:
+  - booking.status = 'upcoming'
+  - booking.payment_status = 'paid'
+  - sendMessage клиенту: подтверждение
+  - sendMessage мастеру: уведомление
 ```
 
 ---
 
-## 6. Что нужно изменить во фронтенде
+## 9. Безопасность
 
-Изменений минимум — только замена источников данных.
+### Верификация initData
 
-| Функция в `app.js` | Что изменить |
-|---|---|
-| `DATA.isSlotBooked()` в `renderSlots()` (строка 485) | Заменить на `GET /api/slots?date=` с кешированием результата на время сессии |
-| `renderPayment()` (строка 638) | Заменить setTimeout на `POST /api/bookings` → для платных услуг `tg.openInvoice()` |
-| `saveBooking()` и `persistBookings()` (строки 654–669) | Убрать запись в localStorage; список записей тянуть с `GET /api/bookings/my` |
-| `loadBookings()` (строка 672) | Заменить на вызов API |
-| `doCancel()` (строка 673) | Добавить вызов `PATCH /api/bookings/:id/cancel` перед `renderMyBookings()` |
-| Инициализация (строка 835) | После верификации пользователя тянуть `GET /api/bookings/my` вместо `localStorage` |
+```js
+function verifyInitData(initDataRaw, botToken) {
+  const params = new URLSearchParams(initDataRaw);
+  const hash = params.get('hash');
+  params.delete('hash');
+  
+  const dataCheckString = [...params.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n');
+  
+  const secretKey = crypto.createHmac('sha256', 'WebAppData')
+    .update(botToken).digest();
+  const expectedHash = crypto.createHmac('sha256', secretKey)
+    .update(dataCheckString).digest('hex');
+  
+  return hash === expectedHash;
+}
+```
 
-Всё остальное (навигация, рендеринг, квиз, тест тревожности) **не меняется** — данные для этого статичные.
+Каждый API-запрос проходит через этот middleware. `botToken` берётся из таблицы `masters` по `masterId` из URL.
+
+### Изоляция данных
+
+Каждый SQL-запрос содержит `WHERE master_id = $1`. Клиент никогда не может получить данные другого мастера — даже если знает чужой `master_id`.
 
 ---
 
-## 7. Технический стек
+## 10. Tech Stack
 
 | Слой | Технология | Почему |
 |---|---|---|
-| Сервер | Node.js + Fastify | Указан в `CLAUDE.md`; быстрый, минимальный бойлерплейт |
-| База данных | PostgreSQL | Указан в `CLAUDE.md` |
-| Telegram Bot | `node-telegram-bot-api` или `grammY` | Указаны в `CLAUDE.md` |
-| Платежи | YooKassa | Указан в `CLAUDE.md` и `research.md`; работает в России |
-| Хостинг | VPS с HTTPS | Обязательно для Telegram Mini App и Bot webhook |
-| Планировщик | node-cron | Напоминания; встроен в тот же процесс, не нужен отдельный воркер |
+| Backend | Node.js + Express | Один язык с фронтом, большая экосистема |
+| База данных | PostgreSQL | ACID, JSONB для education/includes |
+| ORM | node-postgres (pg) | Без абстракций, прямой SQL |
+| Хостинг | Railway | Free PostgreSQL + Node.js, один клик |
+| Планировщик | node-cron | Напоминания в 9:00 и за 1 час до сессии |
+| Токены в .env | dotenv | Разные .env на dev/prod |
 
 ---
 
-## 8. Переменные окружения
+## 11. Стадии разработки
 
-```
-BOT_TOKEN=          # токен от @BotFather
-YOOKASSA_SHOP_ID=   # ID магазина YooKassa
-YOOKASSA_SECRET=    # секретный ключ YooKassa
-ELENA_TG_USER_ID=   # Telegram user.id Елены — для доступа к /admin/*
-DATABASE_URL=       # postgresql://user:pass@host:5432/dbname
-WEBHOOK_URL=        # https://yourdomain.com/bot/webhook
-```
+### Стадия 1 — Один мастер работает (2–3 дня)
+- [ ] Таблицы: masters, services, bookings, schedule
+- [ ] API: GET /master/:id, GET /slots, POST /bookings, GET /bookings/my
+- [ ] Webhook: принимает обновления, уведомляет мастера о новой записи
+- [ ] Mini App: заменить data.js на fetch из API
+- [ ] Деплой на Railway
+
+### Стадия 2 — Мастер управляет через бота (1–2 дня)
+- [ ] Команды: /dashboard, /bookings, /block, /link
+- [ ] Blocked_slots API
+- [ ] Фото-аватар в Mini App
+
+### Стадия 3 — Онбординг нового мастера (2–3 дня)
+- [ ] Платформенный бот (/register)
+- [ ] Диалог заполнения профиля, услуг, расписания
+- [ ] Авто-настройка webhook + MenuButton для нового бота
+
+### Стадия 4 — Оплата (2–3 дня)
+- [ ] Telegram Payments: sendInvoice, pre_checkout_query, successful_payment
+- [ ] Обновление статусов в bookings
+- [ ] Уведомления об оплате
+
+### Стадия 5 — Уведомления и напоминания (1 день)
+- [ ] node-cron: проверка записей каждые 30 мин
+- [ ] Отправка напоминаний за 24 ч и за 1 ч
+- [ ] Добавление meet_link вручную через команду /meet 123 https://...
 
 ---
 
-## 9. Порядок реализации
+## 12. Переменные окружения
 
-| Этап | Что делать | Что даёт |
-|---|---|---|
-| 1 | Таблицы `bookings`, `blocked_slots`, `schedule_settings`. POST /api/bookings для `trial`. GET /api/bookings/my. PATCH cancel. | Записи сохраняются на сервере, не теряются |
-| 2 | GET /api/slots с реальными данными из `bookings`. | Занятость слотов отражает реальность |
-| 3 | Telegram Payments: sendInvoice, pre_checkout_query, successful_payment. | Реальная оплата |
-| 4 | Бот-сообщения: подтверждение сразу + cron-напоминания за 24ч и 1ч. | Клиент получает уведомления |
-| 5 | /admin/* эндпоинты + блокировка слотов. | Елена управляет расписанием |
+```env
+# Платформенный бот (для онбординга мастеров)
+PLATFORM_BOT_TOKEN=...
+PLATFORM_BOT_SECRET=...   # для верификации webhook
+
+# База данных
+DATABASE_URL=postgresql://...
+
+# Базовый URL платформы
+BASE_URL=https://api.platform.com
+MINI_APP_URL=https://platform.com/app
+
+# Опционально
+LOG_LEVEL=info
+```
+
+Токены ботов мастеров хранятся в таблице `masters.bot_token`, а не в .env.
+
+---
+
+## 13. Что остаётся на клиенте (не переносится)
+
+| Что | Почему оставляем |
+|---|---|
+| Тест GAD-7 (7 вопросов) | Чистая клиентская логика, нет смысла серверить |
+| Квиз онбординга | Тоже клиентский, результат — рекомендация услуги |
+| Анимации и переходы | CSS/JS, не нужен сервер |
+| localStorage для welcomeDone, offerShown | Разовые флаги, не критичны для бизнеса |
